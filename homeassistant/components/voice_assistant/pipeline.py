@@ -57,7 +57,7 @@ async def async_get_pipeline(
 
     # Construct a pipeline for the required/configured language
     language = language or hass.config.language
-    return await pipeline_store.async_create_item(
+    _, pipeline = await pipeline_store.async_create_item(
         {
             "name": language,
             "language": language,
@@ -66,6 +66,7 @@ async def async_get_pipeline(
             "tts_engine": None,  # first engine
         }
     )
+    return pipeline
 
 
 class PipelineEventType(StrEnum):
@@ -543,7 +544,7 @@ class PipelineStorageCollection(StorageCollection[Pipeline]):
         """Create an item from its serialized representation."""
         return Pipeline(**data)
 
-    def _serialize_item(self, item_id: str, item: Pipeline) -> dict:
+    def _serialize_item(self, item: Pipeline) -> dict:
         """Return the serialized representation of an item."""
         return item.to_json()
 
