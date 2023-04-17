@@ -928,10 +928,10 @@ def test_resolve_engine(hass: HomeAssistant, setup_tts) -> None:
     assert tts.async_resolve_engine(hass, "test") == "test"
     assert tts.async_resolve_engine(hass, "non-existing") is None
 
-    with patch.dict(hass.data[tts.DOMAIN].providers, {}, clear=True):
+    with patch.dict(hass.data[tts.DATA_TTS_MANAGER].providers, {}, clear=True):
         assert tts.async_resolve_engine(hass, "test") is None
 
-    with patch.dict(hass.data[tts.DOMAIN].providers, {"cloud": object()}):
+    with patch.dict(hass.data[tts.DATA_TTS_MANAGER].providers, {"cloud": object()}):
         assert tts.async_resolve_engine(hass, None) == "cloud"
 
 

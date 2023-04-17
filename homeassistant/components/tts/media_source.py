@@ -19,7 +19,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.network import get_url
 
-from .const import DOMAIN
+from .const import DATA_TTS_MANAGER, DOMAIN
+from .helper import get_engine_instance
 
 if TYPE_CHECKING:
     from . import SpeechManager
@@ -42,12 +43,16 @@ def generate_media_source_id(
     """Generate a media source ID for text-to-speech."""
     from . import async_resolve_engine  # pylint: disable=import-outside-toplevel
 
-    manager: SpeechManager = hass.data[DOMAIN]
+    manager: SpeechManager = hass.data[DATA_TTS_MANAGER]
 
     if (engine := async_resolve_engine(hass, engine)) is None:
         raise HomeAssistantError("Invalid TTS provider selected")
 
-    manager.process_options(engine, language, options)
+    engine_instance = get_engine_instance(hass, engine)
+    # We raise above if the engine is not resolved, so engine_instance can't be None
+    assert engine_instance is not None
+
+    manager.process_options(engine_instance, language, options)
     params = {
         "message": message,
     }
@@ -107,7 +112,7 @@ class TTSMediaSource(MediaSource):
 
     async def async_resolve_media(self, item: MediaSourceItem) -> PlayMedia:
         """Resolve media to a url."""
-        manager: SpeechManager = self.hass.data[DOMAIN]
+        manager: SpeechManager = self.hass.data[DATA_TTS_MANAGER]
 
         try:
             url = await manager.async_get_url_path(
@@ -133,7 +138,7 @@ class TTSMediaSource(MediaSource):
             return self._provider_item(provider, params)
 
         # Root. List providers.
-        manager: SpeechManager = self.hass.data[DOMAIN]
+        manager: SpeechManager = self.hass.data[DATA_TTS_MANAGER]
         children = [self._provider_item(provider) for provider in manager.providers]
         return BrowseMediaSource(
             domain=DOMAIN,
@@ -152,7 +157,7 @@ class TTSMediaSource(MediaSource):
         self, provider_domain: str, params: str | None = None
     ) -> BrowseMediaSource:
         """Return provider item."""
-        manager: SpeechManager = self.hass.data[DOMAIN]
+        manager: SpeechManager = self.hass.data[DATA_TTS_MANAGER]
         if (provider := manager.providers.get(provider_domain)) is None:
             raise BrowseError("Unknown provider")
 
