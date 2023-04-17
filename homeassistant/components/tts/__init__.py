@@ -218,16 +218,6 @@ class TextToSpeechEntity(RestoreEntity):
 
     @property
     @final
-    def name(self) -> str:
-        """Return the name of the entity."""
-        # Only one entity is allowed per platform for now.
-        if self.platform is None:
-            raise RuntimeError("Entity is not added to hass yet.")
-
-        return self.platform.platform_name
-
-    @property
-    @final
     def state(self) -> str | None:
         """Return the state of the entity."""
         if self.__last_tts_loaded is None:
