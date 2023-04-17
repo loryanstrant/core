@@ -1,5 +1,6 @@
 """The tests for the TTS component."""
 import asyncio
+from collections.abc import Generator
 from http import HTTPStatus
 from typing import Any
 from unittest.mock import patch
@@ -18,23 +19,29 @@ from homeassistant.components.media_player import (
 )
 from homeassistant.components.media_source import Unresolvable
 from homeassistant.components.tts.legacy import _valid_base_url
+from homeassistant.config_entries import ConfigEntry, ConfigFlow
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.setup import async_setup_component
 from homeassistant.util.network import normalize_url
 
-from .common import MockProvider, MockTTS
+from .common import DEFAULT_LANG, MockProvider, MockTTS, MockTTSEntity
 
 from tests.common import (
+    MockConfigEntry,
     MockModule,
+    MockPlatform,
     assert_setup_component,
     async_mock_service,
+    mock_config_flow,
     mock_integration,
     mock_platform,
 )
 from tests.typing import ClientSessionGenerator
 
 ORIG_WRITE_TAGS = tts.SpeechManager.write_tags
+TEST_DOMAIN = "test"
 
 
 async def get_media_source_url(hass: HomeAssistant, media_content_id: str) -> str:
@@ -47,20 +54,106 @@ async def get_media_source_url(hass: HomeAssistant, media_content_id: str) -> st
 
 
 @pytest.fixture
-def mock_provider() -> MockProvider:
-    """Test TTS provider."""
-    return MockProvider("en")
-
-
-@pytest.fixture
 async def setup_tts(hass: HomeAssistant, mock_tts: None) -> None:
     """Mock TTS."""
     assert await async_setup_component(hass, tts.DOMAIN, {"tts": {"platform": "test"}})
 
 
-async def test_setup_component(hass: HomeAssistant, setup_tts) -> None:
+class TTSFlow(ConfigFlow):
+    """Test flow."""
+
+
+@pytest.fixture(autouse=True)
+def config_flow_fixture(hass: HomeAssistant) -> Generator[None, None, None]:
+    """Mock config flow."""
+    mock_platform(hass, f"{TEST_DOMAIN}.config_flow")
+
+    with mock_config_flow(TEST_DOMAIN, TTSFlow):
+        yield
+
+
+@pytest.fixture(name="setup")
+async def setup_fixture(
+    hass: HomeAssistant,
+    request: pytest.FixtureRequest,
+    mock_provider: MockProvider,
+    mock_tts_entity: MockTTSEntity,
+) -> None:
+    """Set up the test environment."""
+    if request.param == "mock_setup":
+        await mock_setup(hass, mock_provider)
+    elif request.param == "mock_config_entry_setup":
+        await mock_config_entry_setup(hass, mock_tts_entity)
+    else:
+        raise RuntimeError("Invalid setup fixture")
+
+
+async def mock_setup(
+    hass: HomeAssistant,
+    mock_provider: MockProvider,
+) -> None:
+    """Set up a test provider."""
+    mock_integration(hass, MockModule(domain=TEST_DOMAIN))
+    mock_platform(hass, f"{TEST_DOMAIN}.{tts.DOMAIN}", MockTTS(mock_provider))
+
+    assert await async_setup_component(
+        hass, tts.DOMAIN, {tts.DOMAIN: {"platform": TEST_DOMAIN}}
+    )
+    await hass.async_block_till_done()
+
+
+async def mock_config_entry_setup(
+    hass: HomeAssistant, tts_entity: MockTTSEntity
+) -> MockConfigEntry:
+    """Set up a test tts platform via config entry."""
+
+    async def async_setup_entry_init(
+        hass: HomeAssistant, config_entry: ConfigEntry
+    ) -> bool:
+        """Set up test config entry."""
+        await hass.config_entries.async_forward_entry_setup(config_entry, tts.DOMAIN)
+        return True
+
+    async def async_unload_entry_init(
+        hass: HomeAssistant, config_entry: ConfigEntry
+    ) -> bool:
+        """Unload up test config entry."""
+        await hass.config_entries.async_forward_entry_unload(config_entry, tts.DOMAIN)
+        return True
+
+    mock_integration(
+        hass,
+        MockModule(
+            TEST_DOMAIN,
+            async_setup_entry=async_setup_entry_init,
+            async_unload_entry=async_unload_entry_init,
+        ),
+    )
+
+    async def async_setup_entry_platform(
+        hass: HomeAssistant,
+        config_entry: ConfigEntry,
+        async_add_entities: AddEntitiesCallback,
+    ) -> None:
+        """Set up test tts platform via config entry."""
+        async_add_entities([tts_entity])
+
+    loaded_platform = MockPlatform(async_setup_entry=async_setup_entry_platform)
+    mock_platform(hass, f"{TEST_DOMAIN}.{tts.DOMAIN}", loaded_platform)
+
+    config_entry = MockConfigEntry(domain=TEST_DOMAIN)
+    config_entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(config_entry.entry_id)
+    await hass.async_block_till_done()
+
+    return config_entry
+
+
+@pytest.mark.parametrize(
+    "setup", ["mock_setup", "mock_config_entry_setup"], indirect=True
+)
+async def test_setup_component(hass: HomeAssistant, setup: str) -> None:
     """Set up a TTS platform with defaults."""
-    assert hass.services.has_service(tts.DOMAIN, "test_say")
     assert hass.services.has_service(tts.DOMAIN, "clear_cache")
     assert f"{tts.DOMAIN}.test" in hass.config.components
 
@@ -112,13 +205,14 @@ async def test_setup_component_and_test_service(
     ).is_file()
 
 
+@pytest.mark.parametrize("mock_provider", [MockProvider("de")])
 async def test_setup_component_and_test_service_with_config_language(
     hass: HomeAssistant, empty_cache_dir, mock_tts
 ) -> None:
     """Set up a TTS platform and call service."""
     calls = async_mock_service(hass, DOMAIN_MP, SERVICE_PLAY_MEDIA)
 
-    config = {tts.DOMAIN: {"platform": "test", "language": "de"}}
+    config = {tts.DOMAIN: {"platform": "test"}}
 
     with assert_setup_component(1, tts.DOMAIN):
         assert await async_setup_component(hass, tts.DOMAIN, config)
@@ -144,13 +238,14 @@ async def test_setup_component_and_test_service_with_config_language(
     ).is_file()
 
 
+@pytest.mark.parametrize("mock_provider", [MockProvider("en_US")])
 async def test_setup_component_and_test_service_with_config_language_special(
     hass: HomeAssistant, empty_cache_dir, mock_tts
 ) -> None:
     """Set up a TTS platform and call service with extend language."""
     calls = async_mock_service(hass, DOMAIN_MP, SERVICE_PLAY_MEDIA)
 
-    config = {tts.DOMAIN: {"platform": "test", "language": "en_US"}}
+    config = {tts.DOMAIN: {"platform": "test"}}
 
     with assert_setup_component(1, tts.DOMAIN):
         assert await async_setup_component(hass, tts.DOMAIN, config)
@@ -300,7 +395,7 @@ async def test_setup_component_and_test_with_service_options_def(
             return {"voice": "alex"}
 
     mock_integration(hass, MockModule(domain="test"))
-    mock_platform(hass, "test.tts", MockTTS(MockProviderWithDefaults))
+    mock_platform(hass, "test.tts", MockTTS(MockProviderWithDefaults(DEFAULT_LANG)))
 
     with assert_setup_component(1, tts.DOMAIN):
         assert await async_setup_component(hass, tts.DOMAIN, config)
@@ -349,7 +444,7 @@ async def test_setup_component_and_test_with_service_options_def_2(
             return {"voice": "alex"}
 
     mock_integration(hass, MockModule(domain="test"))
-    mock_platform(hass, "test.tts", MockTTS(MockProviderWithDefaults))
+    mock_platform(hass, "test.tts", MockTTS(MockProviderWithDefaults(DEFAULT_LANG)))
 
     with assert_setup_component(1, tts.DOMAIN):
         assert await async_setup_component(hass, tts.DOMAIN, config)
@@ -688,7 +783,7 @@ async def test_setup_component_test_with_cache_dir(
             raise Exception("Boom!")  # pylint: disable=broad-exception-raised
 
     mock_integration(hass, MockModule(domain="test"))
-    mock_platform(hass, "test.tts", MockTTS(MockProviderBoom))
+    mock_platform(hass, "test.tts", MockTTS(MockProviderBoom(DEFAULT_LANG)))
 
     with assert_setup_component(1, tts.DOMAIN):
         assert await async_setup_component(hass, tts.DOMAIN, config)
@@ -726,7 +821,7 @@ async def test_setup_component_test_with_error_on_get_tts(hass: HomeAssistant) -
             return (None, None)
 
     mock_integration(hass, MockModule(domain="test"))
-    mock_platform(hass, "test.tts", MockTTS(MockProviderEmpty))
+    mock_platform(hass, "test.tts", MockTTS(MockProviderEmpty(DEFAULT_LANG)))
 
     with assert_setup_component(1, tts.DOMAIN):
         assert await async_setup_component(hass, tts.DOMAIN, config)
@@ -970,7 +1065,7 @@ async def test_fetching_in_async(
             return ("mp3", await tts_audio)
 
     mock_integration(hass, MockModule(domain="test"))
-    mock_platform(hass, "test.tts", MockTTS(ProviderWithAsyncFetching))
+    mock_platform(hass, "test.tts", MockTTS(ProviderWithAsyncFetching(DEFAULT_LANG)))
     assert await async_setup_component(hass, tts.DOMAIN, {"tts": {"platform": "test"}})
 
     # Test async_get_media_source_audio

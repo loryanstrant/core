@@ -9,6 +9,7 @@ from homeassistant.components.tts import (
     CONF_LANG,
     PLATFORM_SCHEMA,
     Provider,
+    TextToSpeechEntity,
     TtsAudioType,
 )
 from homeassistant.core import HomeAssistant
@@ -21,13 +22,12 @@ SUPPORT_LANGUAGES = ["de", "en", "en_US"]
 DEFAULT_LANG = "en"
 
 
-class MockProvider(Provider):
+class BaseProvider:
     """Test speech API provider."""
 
     def __init__(self, lang: str) -> None:
         """Initialize test provider."""
         self._lang = lang
-        self.name = "Test"
 
     @property
     def default_language(self) -> str:
@@ -51,6 +51,24 @@ class MockProvider(Provider):
         return ("mp3", b"")
 
 
+class MockProvider(BaseProvider, Provider):
+    """Test speech API provider."""
+
+    def __init__(self, lang: str) -> None:
+        """Initialize test provider."""
+        super().__init__(lang)
+        self.name = "Test"
+
+
+class MockTTSEntity(BaseProvider, TextToSpeechEntity):
+    """Test speech API provider."""
+
+    @property
+    def name(self) -> str:
+        """Return the name of the entity."""
+        return "Test"
+
+
 class MockTTS(MockPlatform):
     """A mock TTS platform."""
 
@@ -58,13 +76,9 @@ class MockTTS(MockPlatform):
         {vol.Optional(CONF_LANG, default=DEFAULT_LANG): vol.In(SUPPORT_LANGUAGES)}
     )
 
-    def __init__(
-        self, provider: type[MockProvider] | None = None, **kwargs: Any
-    ) -> None:
+    def __init__(self, provider: MockProvider, **kwargs: Any) -> None:
         """Initialize."""
         super().__init__(**kwargs)
-        if provider is None:
-            provider = MockProvider
         self._provider = provider
 
     async def async_get_engine(
@@ -74,4 +88,4 @@ class MockTTS(MockPlatform):
         discovery_info: DiscoveryInfoType | None = None,
     ) -> Provider | None:
         """Set up a mock speech component."""
-        return self._provider(config.get(CONF_LANG, DEFAULT_LANG))
+        return self._provider

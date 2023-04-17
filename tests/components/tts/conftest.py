@@ -10,7 +10,7 @@ from homeassistant.components.tts import _get_cache_files
 from homeassistant.config import async_process_ha_core_config
 from homeassistant.core import HomeAssistant
 
-from .common import MockTTS
+from .common import MockProvider, MockTTS, MockTTSEntity
 
 from tests.common import MockModule, mock_integration, mock_platform
 
@@ -89,7 +89,19 @@ async def internal_url_mock(hass: HomeAssistant) -> None:
 
 
 @pytest.fixture
-async def mock_tts(hass: HomeAssistant) -> None:
+async def mock_tts(hass: HomeAssistant, mock_provider) -> None:
     """Mock TTS."""
     mock_integration(hass, MockModule(domain="test"))
-    mock_platform(hass, "test.tts", MockTTS())
+    mock_platform(hass, "test.tts", MockTTS(mock_provider))
+
+
+@pytest.fixture
+def mock_provider() -> MockProvider:
+    """Test TTS provider."""
+    return MockProvider("en")
+
+
+@pytest.fixture
+def mock_tts_entity() -> MockTTSEntity:
+    """Test TTS entity."""
+    return MockTTSEntity("en")
